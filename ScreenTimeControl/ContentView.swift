@@ -6,81 +6,155 @@
 //
 import SwiftUI
 
-/// A high-level dashboard screen displaying user metrics,
-/// blocked app insights, and selectable premium alternatives.
-///
-/// `DashboardView` is composed of four primary sections:
-/// - Header (user greeting + lock toggle)
-/// - Top metrics (usage statistics + blocked apps summary)
-/// - Alternatives header
-/// - Animated list of premium alternatives
-///
-/// The view uses spring animations to provide smooth entrance
-/// transitions and state-based UI updates.
+// MARK: - Mock Data Models
+
+/// Represents an application that has been restricted.
+struct BlockedApp: Identifiable {
+    let id = UUID()
+    let name: String
+    let color: Color
+}
+
+/// Represents a healthy alternative activity to replace screen time.
+/// Conforms to `Equatable` so SwiftUI knows exactly when a specific row changes.
+struct PremiumAlternative: Identifiable, Equatable {
+    let id = UUID()
+    let title: String
+    let subtitle: String
+    let iconName: String // SFSymbol name
+    let color: Color
+}
+
+// MARK: - Main View
+
 struct DashboardView: View {
-    
-    /// Indicates whether the dashboard is currently in a locked state.
-    /// Toggling this value updates the lock UI with animation.
+    // Controls the padlock toggle state at the top right
     @State private var isLocked: Bool = true
     
-    /// Controls the entrance animation of the main sections.
-    /// Set to `true` inside `onAppear` to trigger animated transitions.
+    // Triggers the initial cascading entry animation when the view loads
     @State private var appearAnimation: Bool = false
     
-    /// The currently selected premium alternative index.
-    /// Determines which `AlternativeRow` is displayed as active.
-    @State private var selectedAlternativeIndex: Int = 2
+    // Tracks which premium alternative is currently selected by its unique ID
+    @State private var selectedAlternativeID: UUID? = nil
+    
+    // MARK: Modal & Animation States
+    
+    // Toggles the visibility of the expanded Blocked Apps view
+    @State private var showBlockedAppsModal: Bool = false
+    
+    // Namespace required for `matchedGeometryEffect` to smoothly morph
+    // the small card into the large modal view
+    @Namespace private var animation
+    
+    // MARK: Data Sources
+    
+    // Static mock data for the blocked applications
+    let blockedApps: [BlockedApp] = [
+        BlockedApp(name: "Instagram", color: .pink),
+        BlockedApp(name: "TikTok", color: .black),
+        BlockedApp(name: "Snapchat", color: .yellow),
+        BlockedApp(name: "X (Twitter)", color: .blue),
+        BlockedApp(name: "Facebook", color: .blue.opacity(0.7)),
+        BlockedApp(name: "Reddit", color: .orange),
+        BlockedApp(name: "YouTube", color: .red),
+        BlockedApp(name: "Netflix", color: .red.opacity(0.8)),
+        BlockedApp(name: "Games", color: .green)
+    ]
+    
+    // The master pool of all available healthy habits
+    let masterAlternatives: [PremiumAlternative] = [
+        PremiumAlternative(title: "Lofi Music", subtitle: "App blocks and take a lofi break", iconName: "headphones", color: .purple),
+        PremiumAlternative(title: "Nature Sounds", subtitle: "Relax with ambient forest audio", iconName: "leaf.fill", color: .green),
+        PremiumAlternative(title: "Pomodoro Timer", subtitle: "Focus for 25 mins, then rest", iconName: "timer", color: .orange),
+        PremiumAlternative(title: "Breathwork", subtitle: "Guided 5-minute breathing", iconName: "wind", color: .cyan),
+        PremiumAlternative(title: "Reading Mode", subtitle: "Open your Kindle app instead", iconName: "book.fill", color: .blue),
+        PremiumAlternative(title: "Sudoku Puzzle", subtitle: "Stimulate your brain with logic", iconName: "number.square.fill", color: .indigo),
+        PremiumAlternative(title: "Stretching", subtitle: "Quick desk stretches for posture", iconName: "figure.walk", color: .yellow),
+        PremiumAlternative(title: "Journaling", subtitle: "Write down your thoughts", iconName: "text.book.closed.fill", color: .mint)
+    ]
+    
+    // The subset of 4 alternatives actively displayed on the screen
+    @State private var currentAlternatives: [PremiumAlternative] = []
     
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
-                
-                // MARK: - Header
-                headerSection
-                    .opacity(appearAnimation ? 1 : 0)
-                    .offset(y: appearAnimation ? 0 : -20)
-                
-                // MARK: - Top Metrics
-                metricsSection
-                    .opacity(appearAnimation ? 1 : 0)
-                    .offset(y: appearAnimation ? 0 : 20)
-                
-                // MARK: - Alternatives Section
-                alternativesHeader
-                    .opacity(appearAnimation ? 1 : 0)
-                
-                alternativesList
+        ZStack {
+            // MARK: Main Background
+            // Using Apple's native grouped background color provides automatic
+            // light/dark mode support and matches the iOS Settings app style.
+            Color(UIColor.systemGroupedBackground)
+                .ignoresSafeArea()
+            
+            // MARK: Main Scroll Content
+            ScrollView {
+                VStack(alignment: .leading, spacing: 24) {
+                    headerSection
+                        // Applies the slide-up and fade-in animation on launch
+                        .opacity(appearAnimation ? 1 : 0)
+                        .offset(y: appearAnimation ? 0 : -20)
+                    
+                    metricsSection
+                        .opacity(appearAnimation ? 1 : 0)
+                        .offset(y: appearAnimation ? 0 : 20)
+                    
+                    alternativesHeader
+                        .opacity(appearAnimation ? 1 : 0)
+                    
+                    alternativesList
+                }
+                .padding()
             }
-            .padding()
+            // Dims and blurs the underlying content when the modal pops open
+            .blur(radius: showBlockedAppsModal ? 5 : 0)
+            .opacity(showBlockedAppsModal ? 0.6 : 1)
+            
+            // MARK: Expanded Modal Overlay
+            if showBlockedAppsModal {
+                // An almost-invisible background layer that captures taps
+                // to dismiss the modal when tapping outside the card
+                Color.black.opacity(0.01)
+                    .ignoresSafeArea()
+                    .onTapGesture {
+                        closeModal()
+                    }
+                
+                BlockedAppsExpandedView(
+                    apps: blockedApps,
+                    namespace: animation,
+                    onClose: closeModal
+                )
+                // zIndex ensures the modal animates OVER the scroll content
+                .zIndex(1)
+            }
         }
-        .background(Color(UIColor.systemGroupedBackground).ignoresSafeArea())
         .onAppear {
-            // Triggers entrance animation for header and metrics
+            // Initialize the list with the first 4 items from the master pool
+            currentAlternatives = Array(masterAlternatives.prefix(4))
+            
+            // Pre-select the third item to match your original design requirement
+            if let thirdItem = currentAlternatives.dropFirst(2).first {
+                selectedAlternativeID = thirdItem.id
+            }
+            
+            // Trigger the initial entry animations with a gentle spring
             withAnimation(.spring(response: 0.6, dampingFraction: 0.8)) {
                 appearAnimation = true
             }
         }
     }
-}
-
-// MARK: - Private Subviews
-extension DashboardView {
     
-    /// Header section containing:
-    /// - Greeting text
-    /// - Animated lock/unlock toggle button
-    ///
-    /// The lock button animates both symbol replacement and
-    /// toggle indicator position using a spring animation.
+    // MARK: - View Builders (Subviews)
+    
     private var headerSection: some View {
         HStack(alignment: .top) {
             Text("Hi Anonymous\nChild")
+                // `.design: .rounded` gives it a friendly, modern Apple feel
                 .font(.system(.largeTitle, design: .rounded))
                 .fontWeight(.bold)
                 .foregroundColor(.primary)
             
             Spacer()
             
+            // Lock Toggle Button
             Button(action: {
                 withAnimation(.spring(response: 0.4, dampingFraction: 0.6)) {
                     isLocked.toggle()
@@ -89,8 +163,10 @@ extension DashboardView {
                 HStack(spacing: 8) {
                     Image(systemName: isLocked ? "lock.fill" : "lock.open.fill")
                         .foregroundColor(isLocked ? .primary : .secondary)
+                        // Smoothly morphs the padlock icon from closed to open
                         .contentTransition(.symbolEffect(.replace))
                     
+                    // The sliding "thumb" of the custom toggle switch
                     Circle()
                         .fill(isLocked ? Color.red.opacity(0.8) : Color.gray.opacity(0.3))
                         .frame(width: 20, height: 20)
@@ -102,36 +178,43 @@ extension DashboardView {
                 .clipShape(Capsule())
                 .shadow(color: .black.opacity(0.05), radius: 5, x: 0, y: 2)
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.plain) // Prevents the whole button from flashing blue on tap
         }
         .padding(.top, 10)
     }
     
-    /// Displays usage metrics and blocked apps summary.
-    ///
-    /// Layout:
-    /// - Left column: two `MetricCard` views
-    /// - Right column: `BlockedAppsCard`
-    ///
-    /// Each column expands to occupy 50% of available width.
     private var metricsSection: some View {
         HStack(spacing: 16) {
+            // Left column containing two stacked metrics
             VStack(spacing: 16) {
                 MetricCard(title: "Daily usage", value: "5 hrs 24 mins")
                 MetricCard(title: "Focus Time", value: "1 hrs 03 mins")
             }
+            // `maxWidth: .infinity` allows this column to take up exactly 50% of the screen width
             .frame(maxWidth: .infinity)
             
-            BlockedAppsCard()
+            // Right column: The interactive Blocked Apps card
+            if !showBlockedAppsModal {
+                Button(action: {
+                    withAnimation(.spring(response: 0.6, dampingFraction: 0.75)) {
+                        showBlockedAppsModal = true
+                    }
+                }) {
+                    BlockedAppsCard()
+                }
+                .buttonStyle(.plain)
+                // This ID must exactly match the ID in the ExpandedView for the morph to work
+                .matchedGeometryEffect(id: "blockedAppsCard", in: animation)
                 .frame(maxWidth: .infinity)
+            } else {
+                // When the modal opens, we leave a transparent placeholder here
+                // so the left column doesn't snap to the center of the screen
+                Color.clear
+                    .frame(maxWidth: .infinity)
+            }
         }
     }
     
-    /// Header row for the Premium Alternatives section.
-    ///
-    /// Includes:
-    /// - Section title
-    /// - Shuffle button with haptic feedback
     private var alternativesHeader: some View {
         HStack {
             Text("Premium Alternatives")
@@ -141,8 +224,7 @@ extension DashboardView {
             Spacer()
             
             Button(action: {
-                let generator = UIImpactFeedbackGenerator(style: .light)
-                generator.impactOccurred()
+                shuffleAlternatives()
             }) {
                 Image(systemName: "shuffle")
                     .font(.system(size: 18, weight: .bold))
@@ -152,39 +234,61 @@ extension DashboardView {
         .padding(.top, 10)
     }
     
-    /// Animated vertical list of premium alternatives.
-    ///
-    /// Each row:
-    /// - Animates into view with a staggered delay
-    /// - Updates selection with a spring animation
-    /// - Highlights the active row with border + label
     private var alternativesList: some View {
         VStack(spacing: 12) {
-            ForEach(0..<4, id: \.self) { index in
+            // Loop through our dynamically tracked current 4 alternatives
+            ForEach(Array(currentAlternatives.enumerated()), id: \.element.id) { index, alt in
                 AlternativeRow(
-                    isActive: index == selectedAlternativeIndex,
-                    delay: Double(index) * 0.1
+                    alternative: alt,
+                    isActive: selectedAlternativeID == alt.id,
+                    delay: Double(index) * 0.1 // Staggers the animation on load
                 ) {
+                    // Update selection with a bouncy animation
                     withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
-                        selectedAlternativeIndex = index
+                        selectedAlternativeID = alt.id
                     }
                 }
+                // Defines how rows enter and exit when the Shuffle button is pressed
+                // They shrink to 90% scale and fade out/in
+                .transition(.asymmetric(
+                    insertion: .scale(scale: 0.9).combined(with: .opacity),
+                    removal: .scale(scale: 0.9).combined(with: .opacity)
+                ))
             }
+        }
+    }
+    
+    // MARK: - Actions
+    
+    /// Closes the blocked apps modal with a spring animation
+    private func closeModal() {
+        withAnimation(.spring(response: 0.6, dampingFraction: 0.75)) {
+            showBlockedAppsModal = false
+        }
+    }
+    
+    /// Shuffles the current alternatives pool to show 4 new options
+    private func shuffleAlternatives() {
+        // Triggers a light physical haptic tap on the device
+        let generator = UIImpactFeedbackGenerator(style: .medium)
+        generator.impactOccurred()
+        
+        withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
+            // Shuffle the master list and grab the first 4
+            let newSelection = masterAlternatives.shuffled().prefix(4)
+            currentAlternatives = Array(newSelection)
+            
+            // Deselect everything when the list is refreshed
+            selectedAlternativeID = nil
         }
     }
 }
 
-// MARK: - Components
+// MARK: - Reusable Components
 
-/// A reusable metric display card showing a title and value.
-///
-/// Used for daily usage and focus time statistics.
+/// A simple, reusable card for displaying a title and a value
 struct MetricCard: View {
-    
-    /// Metric title (e.g., "Daily usage")
     let title: String
-    
-    /// Metric value (e.g., "5 hrs 24 mins")
     let value: String
     
     var body: some View {
@@ -198,22 +302,21 @@ struct MetricCard: View {
                 .fontWeight(.semibold)
                 .foregroundColor(.primary)
             
+            // Pushes the text to the top
             Spacer(minLength: 0)
         }
         .padding()
+        // Aligns content to the top-left of the card
         .frame(maxWidth: .infinity, alignment: .leading)
+        // `.secondarySystemGroupedBackground` provides proper contrast against the main background
         .background(Color(UIColor.secondarySystemGroupedBackground))
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .shadow(color: .black.opacity(0.04), radius: 8, x: 0, y: 4)
     }
 }
 
-/// A summary card displaying the number of blocked apps
-/// and a stacked preview of app indicators.
-///
-/// Designed to visually balance alongside `MetricCard`.
+/// The unexpanded state of the blocked apps card
 struct BlockedAppsCard: View {
-    
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Blocked Apps")
@@ -226,11 +329,12 @@ struct BlockedAppsCard: View {
             
             Spacer(minLength: 0)
             
+            // Overlapping circles representation (Avatars)
+            // Negative spacing makes the circles overlap like Apple Messages groups
             HStack(spacing: -12) {
                 Circle().fill(Color.green.opacity(0.6)).frame(width: 36)
                 Circle().fill(Color.blue.opacity(0.6)).frame(width: 36)
                 Circle().fill(Color.yellow.opacity(0.6)).frame(width: 36)
-                
                 ZStack {
                     Circle().fill(Color.pink.opacity(0.6)).frame(width: 36)
                     Text("5+")
@@ -248,58 +352,130 @@ struct BlockedAppsCard: View {
     }
 }
 
-/// A selectable row representing a premium alternative.
-///
-/// Features:
-/// - Staggered entrance animation
-/// - Active/inactive state styling
-/// - Animated content transitions
-/// - Spring-based tap selection animation
+/// The full-screen/modal state of the blocked apps list
+struct BlockedAppsExpandedView: View {
+    let apps: [BlockedApp]
+    var namespace: Namespace.ID
+    var onClose: () -> Void
+    
+    var body: some View {
+        VStack(spacing: 0) {
+            // Modal Header
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Blocked Apps")
+                        .font(.title2)
+                        .fontWeight(.bold)
+                    Text("\(apps.count) apps currently restricted")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                }
+                
+                Spacer()
+                
+                // Close button
+                Button(action: onClose) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.title)
+                        .foregroundColor(Color(UIColor.tertiaryLabel))
+                }
+            }
+            .padding()
+            .padding(.top, 8)
+            
+            // Scrollable list of individual apps
+            ScrollView {
+                VStack(spacing: 16) {
+                    ForEach(apps) { app in
+                        HStack(spacing: 16) {
+                            // Faux App Icon
+                            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                                .fill(app.color.opacity(0.2))
+                                .frame(width: 44, height: 44)
+                                .overlay(
+                                    Image(systemName: "app.fill")
+                                        .foregroundColor(app.color)
+                                )
+                            
+                            Text(app.name)
+                                .font(.headline)
+                            
+                            Spacer()
+                            
+                            Image(systemName: "lock.fill")
+                                .foregroundColor(.red.opacity(0.8))
+                                .font(.subheadline)
+                        }
+                        .padding(.horizontal)
+                        
+                        // Separator line native to iOS lists
+                        Divider()
+                            .padding(.leading, 76)
+                    }
+                }
+                .padding(.bottom, 24)
+            }
+        }
+        // Prevents the modal from stretching too wide on iPads, keeping it a nice floating card
+        .frame(maxWidth: 500, maxHeight: 600)
+        .background(Color(UIColor.secondarySystemGroupedBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .shadow(color: .black.opacity(0.15), radius: 20, x: 0, y: 10)
+        .padding()
+        // MAGIC: Links this large view to the small card for the morphing animation
+        .matchedGeometryEffect(id: "blockedAppsCard", in: namespace)
+    }
+}
+
+/// A row displaying a single premium alternative option
 struct AlternativeRow: View {
-    
-    /// Indicates whether the row is currently active.
+    let alternative: PremiumAlternative
     let isActive: Bool
-    
-    /// Delay used to stagger the row entrance animation.
     let delay: Double
-    
-    /// Action triggered when the row is tapped.
     let action: () -> Void
     
-    /// Controls the row’s entrance animation.
+    // Controls the slide-in-from-left animation on initial load
     @State private var isVisible: Bool = false
     
     var body: some View {
         Button(action: action) {
             HStack(spacing: 16) {
-                
+                // Dynamic Icon & Colored Background
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(Color(red: 0.85, green: 0.8, blue: 0.95))
+                    .fill(alternative.color.opacity(0.15))
                     .frame(width: 48, height: 48)
                     .overlay(
+                        Image(systemName: alternative.iconName)
+                            .foregroundColor(alternative.color)
+                            .font(.system(size: 20, weight: .semibold))
+                    )
+                    .overlay(
                         RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .stroke(Color.purple.opacity(0.3), lineWidth: 1)
+                            .stroke(alternative.color.opacity(0.3), lineWidth: 1)
                     )
                 
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Lofi Music")
+                    Text(alternative.title)
                         .font(.headline)
                         .foregroundColor(.primary)
                     
-                    Text("App blocks and take a lofi break")
+                    Text(alternative.subtitle)
                         .font(.system(size: 13))
                         .foregroundColor(.secondary)
+                        // Ensures the subtitle doesn't wrap weirdly on small iPhones (like the SE)
                         .lineLimit(1)
                         .minimumScaleFactor(0.9)
                 }
                 
                 Spacer()
                 
+                // ZStack prevents layout jumps when switching between the Chevron and the "ACTIVE" text
                 ZStack {
                     if isActive {
                         Text("ACTIVE")
                             .font(.system(size: 11, weight: .bold))
-                            .foregroundColor(.purple)
+                            .foregroundColor(alternative.color)
+                            // Fades and scales in simultaneously
                             .transition(.scale.combined(with: .opacity))
                     } else {
                         Image(systemName: "chevron.right")
@@ -312,13 +488,15 @@ struct AlternativeRow: View {
             .padding()
             .background(Color(UIColor.secondarySystemGroupedBackground))
             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            // Adds the colored border when active
             .overlay(
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(isActive ? Color.purple.opacity(0.8) : Color.clear, lineWidth: 2)
+                    .stroke(isActive ? alternative.color.opacity(0.8) : Color.clear, lineWidth: 2)
             )
             .shadow(color: .black.opacity(0.03), radius: 5, x: 0, y: 2)
         }
         .buttonStyle(.plain)
+        // Modifiers for the initial load slide-in animation
         .opacity(isVisible ? 1 : 0)
         .offset(x: isVisible ? 0 : -30)
         .onAppear {
