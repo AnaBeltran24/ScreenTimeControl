@@ -2,7 +2,7 @@
 //  ScreenTimeControlApp.swift
 //  ScreenTimeControl
 //
-//  Created by Daniel Pachon on 12/02/26.
+//  Created by Ana Beltran on 12/02/26.
 //
 
 import SwiftUI
